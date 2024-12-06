@@ -1,12 +1,15 @@
 
 SET NOCOUNT ON;
 
-DECLARE @Id_Evento INT;
-DECLARE @Desde DATETIME='10-1-2024';
-DECLARE @Hasta DATETIME='10-4-2024';
+DECLARE @Id_Evento INT=0
+--DECLARE @Desde DATETIME='11-1-2024';
+--DECLARE @Hasta DATETIME='11-30-2024';
+
+DECLARE @Desde DATETIME='10-2-2024';
+DECLARE @Hasta DATETIME='10-2-2024';
 
 --CUANDO hace LA MISMA pelicula en VARIOS EVENTOS
-DECLARE @Codigo_Incaa INT;
+DECLARE @Codigo_Incaa NVARCHAR(50);
 SELECT TOP 1 @Codigo_Incaa=c.Codigo_Incaa 
 FROM sys_VentaEntradas_Eventos_Peliculas_Cine c 
 WHERE c.Id_Evento=@Id_Evento;
@@ -58,26 +61,35 @@ END;
 
 --FUNCIONES-EVENTOS-TIPO_TARIFA DISPONIBLES (contempla rotular la que es base para asignar las entradas CORT)
 
+
+-- me trae todas las tariafas con su funcion/evento
+
 DECLARE @Funciones TABLE(
 	Id INT PRIMARY KEY IDENTITY(1,1),
 	Codigo_Pelicula NVARCHAR(50),
 	FechaHora_Funcion DATETIME,
-	Precio_Venta NUMERIC(18,3), -- puede ser general o venta 
+	Precio_Venta NUMERIC(18,3), --el precio de tarifa -que  puede ser general o venta 
+	Precio_Sin_Impuesto NUMERIC(18,3), --se calcula del precio venta /1.10
 	Codigo_Distribuidor NVARCHAR(50),
 	Codigo_Sala NVARCHAR(50),
 	Tipo_Tarifa NVARCHAR(7) DEFAULT '', --GENERAL (el precio principal) o nada (son los otros)	,
-	Es_General BIT -- lo uso luego para saber si es base
+	Es_General BIT, -- lo uso luego para saber si es base
+	Serie NVARCHAR(50)
 )
 
-INSERT INTO @Funciones (Codigo_Pelicula, FechaHora_Funcion, Precio_Venta, Codigo_Distribuidor, Codigo_Sala, Es_General)
+INSERT INTO @Funciones (Codigo_Pelicula, FechaHora_Funcion, Precio_Venta, Codigo_Distribuidor, Codigo_Sala, Es_General, Serie)
 SELECT DISTINCT evI.Codigo_Incaa AS Codigo_Pelicula, 
 				f.Fecha AS FechaHora_Funcion, 
-				Precio_Venta=CASE 
-						WHEN t_fu.Id IS NOT NULL  THEN t_fu.Precio  --tarifas
-						ELSE  fu.Precio END, --tarifa unica
+				Precio_Venta=CASE   WHEN t_fu.Id IS NOT NULL  THEN t_fu.Precio  --tarifas
+									ELSE  fu.Precio END, --tarifa unica
 				dI.Codigo_Incaa AS Codigo_Distribuidor,
 				REPLACE(scI.Codigo_Incaa,'_','') AS Codigo_Sala,
-				t.Es_Default 
+				t.Es_Default ,
+				(--SELECT  CASE WHEN rI.Tipo_Entrada='CORT' THEN 'Z'
+				CASE WHEN UPPER(SUBSTRING(t.Descripcion,1,3)) like '%MAY%' OR UPPER(SUBSTRING(t.Descripcion,1,3)) like '%GEN%' THEN 'R' 
+					WHEN UPPER(SUBSTRING(t.Descripcion,1,3)) like '%MEN%' THEN 'S' 
+					WHEN UPPER(SUBSTRING(t.Descripcion,1,3)) like '%JUB%' THEN 'Q' 
+					END ) Serie
 FROM sys_VentaEntradas_Funciones f 
 INNER JOIN sys_VentaEntradas_Eventos ev on f.Id_Evento=ev.Id 
 INNER JOIN sys_VentaEntradas_Eventos_Peliculas_Cine evI ON evI.Id_Evento=ev.Id 
@@ -86,12 +98,21 @@ INNER JOIN sys_VentaEntradas_FuncionUbicacion fu ON fu.Id_Funcion=f.Id
 INNER JOIN sys_VentaEntradas_Ubicaciones u ON u.Id=fu.Id_Ubicacion
 INNER JOIN sys_VentaEntradas_Ubicaciones_Salas_Cine scI ON scI.Id_Ubicacion=u.Id 
 LEFT JOIN  sys_Tarifas_U_FuncionUbicacion t_fu ON t_fu.Id_FuncionUbicacion=fu.Id 
-LEFT JOIN sys_Tarifas t ON t.Id = t_fu.Id_Tarifa
+LEFT JOIN sys_Tarifas t ON t.Id = t_fu.Id_Tarifa 
 WHERE CONVERT(DATE, f.Fecha)>=@Desde AND CONVERT(DATE, f.Fecha)<=@Hasta AND 
 		( evI.Codigo_Incaa=@Codigo_Incaa OR @Codigo_Incaa<=0 OR  @Codigo_Incaa IS NULL )
-ORDER BY Codigo_Pelicula ASC, FechaHora_Funcion ASC, Precio_Venta DESC
+		--
+		--controla que tenga tarifa
+		AND(  CASE   WHEN t_fu.Id IS NOT NULL  THEN t_fu.Precio  ELSE  fu.Precio END IS NOT NULL AND CASE   WHEN t_fu.Id IS NOT NULL  THEN t_fu.Precio  ELSE  fu.Precio END >0 )
+		--
+ORDER BY FechaHora_Funcion ASC, Codigo_Pelicula ASC,  Precio_Venta DESC
 
--- agrupo cada función 
+--SELECT * FROM @Funciones
+
+
+
+
+-- DETERMINAR QUE TARIFA ES GENERAL POR EL MAYOR VALOR O SI FUE MARCADA
 DECLARE Cursor_Funcion CURSOR FOR 
 SELECT Codigo_Distribuidor, f.Codigo_Pelicula, f.Codigo_Sala, f.FechaHora_Funcion
 FROM @Funciones f 
@@ -108,33 +129,37 @@ FETCH NEXT FROM Cursor_Funcion INTO @Codigo_Distribuidor, @Codigo_Pelicula, @Cod
 
 WHILE @@FETCH_STATUS=0
 BEGIN
+	DECLARE @Id_Funcion_General INT=NULL;--es importante inicializar en null!
 
 	--reviso si hay alguna tarifa marcada como general
-	DECLARE @Id_Funcion INT;
-	SELECT TOP 1 @Id_Funcion=f.Id FROM @Funciones f
-	WHERE Codigo_Pelicula=@Codigo_Pelicula  AND Codigo_Pelicula=@Codigo_Pelicula AND Codigo_Sala=@Codigo_Sala AND FechaHora_Funcion=@FechaHora_Funcion 
-				AND f.Es_General =1;
 
-	IF(@Id_Funcion IS NOT NULL)
-		UPDATE @Funciones SET Tipo_Tarifa='GENERAL' WHERE Id=@Id_Funcion;
-	ELSE
-	    --busco el arancel mayor del grupo 
-		UPDATE @Funciones SET Tipo_Tarifa='GENERAL'
-		WHERE Id IN ( SELECT TOP 1  f.Id FROM @Funciones f
-						WHERE f.Codigo_Distribuidor=@Codigo_Distribuidor AND f.Codigo_Pelicula=@Codigo_Pelicula	AND f.Codigo_Sala=@Codigo_Sala AND f.FechaHora_Funcion=@FechaHora_Funcion 
-						ORDER BY f.Precio_Venta DESC );
-				
+	SELECT TOP 1 @Id_Funcion_General=f.Id 
+	FROM @Funciones f
+	WHERE Codigo_Pelicula=@Codigo_Pelicula  AND Codigo_Pelicula=@Codigo_Pelicula AND Codigo_Sala=@Codigo_Sala AND		FechaHora_Funcion=@FechaHora_Funcion 
+			AND f.Es_General =1;
+		
+	IF(@Id_Funcion_General IS NULL)
+	BEGIN
+		-- sino busco con la mayor tarifa		
+		SELECT TOP 1  @Id_Funcion_General=f.Id 
+		FROM @Funciones f
+		WHERE f.Codigo_Distribuidor=@Codigo_Distribuidor AND f.Codigo_Pelicula=@Codigo_Pelicula	AND f.Codigo_Sala=@Codigo_Sala AND f.FechaHora_Funcion=@FechaHora_Funcion 
+		ORDER BY f.Precio_Venta DESC
+	END
+
+	UPDATE @Funciones SET Tipo_Tarifa='GENERAL' WHERE Id=@Id_Funcion_General;
+		
 	FETCH NEXT FROM Cursor_Funcion INTO @Codigo_Distribuidor, @Codigo_Pelicula,@Codigo_Sala,@FechaHora_Funcion;
 END;
 
 CLOSE Cursor_Funcion;
 DEALLOCATE Cursor_Funcion;
 
---SELECT * FROM  @Funciones
+UPDATE @Funciones SET Precio_Sin_Impuesto=Precio_Venta/1.10
 
+SELECT * FROM  @Funciones
 
 --CONSULTA DE ENTRADAS EN EL PERIODO
-
 
 ----CONSULTA DE ENTRADAS 
 
@@ -153,15 +178,14 @@ INSERT INTO @Entradas(Id, Codigo_Pelicula, Codigo_Sala, Codigo_Distribuidor, Fec
 SELECT e.Id AS Id_Entrada, 
 			--
 			evI.Codigo_Incaa AS Codigo_Pelicula,  
-			LI.Codigo_Incaa AS Codigo_Sala,
+			REPLACE(LI.Codigo_Incaa,'_','') AS Codigo_Sala,
 			dI.Codigo_Incaa AS Codigo_Distribuidor,
 			--
 			f.Fecha AS FechaHora_Funcion,
 			e.Entrada_Anulada, e.Activo, e.Cortesia  AS Es_Cortesia,
 			--
-			Precio_Venta=CASE 
-						WHEN t_fu.Id IS NOT NULL  THEN t_fu.Precio  --tarifas
-						ELSE  fu.Precio END --tarifa unica
+			Precio_Venta=CASE WHEN t_fu.Id IS NOT NULL  THEN t_fu.Precio  --tarifas
+						 ELSE  fu.Precio END --tarifa unica
 			--
 FROM sys_VentaEntradas_Entradas e
 INNER join sys_VentaEntradas_Entradas_ItemCarrito eic ON eic.Id_Entrada = e.Id
@@ -174,26 +198,26 @@ INNER JOIN sys_VentaEntradas_Ubicaciones_Salas_Cine LI ON LI.Id_Ubicacion=u.Id
 INNER JOIN sys_VentaEntradas_Eventos_Peliculas_Cine evI ON evI.Id_Evento=ev.Id 
 INNER JOIN sys_VentaEntradas_Distribuidores_Cine dI ON dI.Id=evI.Id_Distribuidor
 LEFT JOIN sys_Tarifas_U_FuncionUbicacion t_fu ON t_fu.Id_FuncionUbicacion=fu.Id
-LEFT JOIN sys_Tarifas t ON t.Id=t_fu.Id_Tarifa and ic.id_Tarifa=t.Id 
-WHERE CONVERT(DATE, f.Fecha)>=@Desde AND CONVERT(DATE, f.Fecha)<=@Hasta AND 
-		( evI.Codigo_Incaa=@Codigo_Incaa OR @Codigo_Incaa<=0 OR  @Codigo_Incaa IS NULL ) 
+INNER JOIN sys_Tarifas t ON t.Id=t_fu.Id_Tarifa and ic.id_Tarifa=t.Id 
+WHERE CONVERT(DATE, f.Fecha)>=@Desde AND CONVERT(DATE, f.Fecha)<=@Hasta AND ( evI.Codigo_Incaa=@Codigo_Incaa OR @Codigo_Incaa<=0 OR  @Codigo_Incaa IS NULL ) 
 
---SELECT * FROM @Entradas
+---SELECT * FROM @Entradas
 
 -- depurando las entradas precios y tipo de entrada o 
 
 DECLARE @Entrada_Incaa TABLE
 (
+	Id_Entrada INT,
 	Codigo_Pelicula NVARCHAR(50),
 	Codigo_Sala NVARCHAR(50),
 	Codigo_Distribuidor NVARCHAR(50),
 	Fecha_Funcion DATETIME,
 	Precio_Final NUMERIC(18,3), --puede ser cero si es cortesia
 	Precio_Tarifa NUMERIC(18,3), --
-	Tipo_Transaccion NVARCHAR(50), --NORMAL (INCLUYE LAS VENDIDAS incluidas las devo) O DEVOLUCION (se reinsertar  las devo)
+	Tipo_Transaccion NVARCHAR(50), --NORMAL (INCLUYE LAS VENDIDAS mas LAS DEVO) O DEVOLUCION (estas se vuelven a insertar -pero como devo)
 	Tipo_Distribucion NVARCHAR(50), --VENTA (se toma el precio_lista) O CORTESIA(se toma el precio base)
 	--
-	Precio_Base NUMERIC(18,3)
+	Precio_Base NUMERIC(18,3)--precio sin el impuesto - 10%
 )
 
 DECLARE Cursor_Entrada CURSOR FOR SELECT e.Id FROM @Entradas e;
@@ -229,32 +253,36 @@ BEGIN
 		SET @Tipo_Distribucion='CORTESIA'; 
 		SET @Tipo_Transaccion='NULL';
 
-		SELECT @Precio_Tarifa=f.Precio_Venta 
-				FROM @Entradas e
-		INNER JOIN @Funciones f ON f.Codigo_Distribuidor=e.Codigo_Distribuidor AND f.Codigo_Pelicula=e.Codigo_Pelicula 
-										AND f.Codigo_Sala=e.Codigo_Sala AND f.FechaHora_Funcion=e.FechaHora_Funcion
+		--le pone el precio general
+		SELECT @Precio_Tarifa=f.Precio_Venta FROM @Entradas e
+		INNER JOIN @Funciones f ON f.Codigo_Distribuidor=e.Codigo_Distribuidor AND f.Codigo_Pelicula=e.Codigo_Pelicula AND f.Codigo_Sala=e.Codigo_Sala AND f.FechaHora_Funcion=e.FechaHora_Funcion
 		WHERE e.Id=@Id_Entrada AND Tipo_Tarifa like 'GENERAL'
 	END
 		
 	--NORMALES
 	ELSE 
 	BEGIN
-		SET @Tipo_Distribucion='NORMAL'; 
-		SET @Tipo_Transaccion='VENTA'
+		SET @Tipo_Distribucion='VENTA'; 
+		SET @Tipo_Transaccion='NORMAL'
 	END
-	
-	--DEVO
-	IF @Es_Anulada=1 AND @ES_Activo=1
+
+	INSERT INTO @Entrada_Incaa(Id_Entrada, Codigo_Distribuidor, Codigo_Pelicula, Codigo_Sala,  Fecha_Funcion,  Precio_Final, Precio_Tarifa, Tipo_Distribucion, Tipo_Transaccion, Precio_Base)
+	SELECT e.Id, e.Codigo_Distribuidor, e.Codigo_Pelicula, e.Codigo_Sala, e.FechaHora_Funcion, @Precio_Final, @Precio_Tarifa, @Tipo_Distribucion, @Tipo_Transaccion, @Precio_Tarifa/1.10
+	FROM @Entradas e 
+	WHERE e.Id=@Id_Entrada
+		
+	--DEVO - la duplica pero como DEVO
+	IF @Es_Anulada=1
 	BEGIN
 		SET @Tipo_Distribucion='VENTA'; 
 		SET @Tipo_Transaccion='DEVOLUCION';
+
+		INSERT INTO @Entrada_Incaa(Id_Entrada, Codigo_Distribuidor, Codigo_Pelicula, Codigo_Sala,  Fecha_Funcion,  Precio_Final, Precio_Tarifa, Tipo_Distribucion, Tipo_Transaccion, Precio_Base)
+		SELECT e.Id, e.Codigo_Distribuidor, e.Codigo_Pelicula, e.Codigo_Sala, e.FechaHora_Funcion, @Precio_Final, @Precio_Tarifa, @Tipo_Distribucion, @Tipo_Transaccion, @Precio_Tarifa/1.10
+		FROM @Entradas e 
+		WHERE e.Id=@Id_Entrada
 	END
-
-	INSERT INTO @Entrada_Incaa(Codigo_Distribuidor, Codigo_Pelicula, Codigo_Sala,  Fecha_Funcion,  Precio_Final, Precio_Tarifa, Tipo_Distribucion, Tipo_Transaccion)
-	SELECT  e.Codigo_Distribuidor, e.Codigo_Pelicula, e.Codigo_Sala, e.FechaHora_Funcion, @Precio_Final, @Precio_Tarifa, @Tipo_Distribucion, @Tipo_Transaccion
-	FROM @Entradas e 
-	WHERE e.Id=@Id_Entrada
-
+	
 	FETCH NEXT FROM Cursor_Entrada INTO @Id_Entrada;
 END
 
@@ -264,71 +292,161 @@ DEALLOCATE Cursor_Entrada;
 
 --SELECT * FROM @Entrada_Incaa;
 
---JUNTANDO TODO - REUNE CALENDARIO - FUNCIONES Y  ENTRADAS
-
---SELECT * FROM @Funciones
---SELECT * FROM @Entradas
-
---DECLARE @Resumen TABLE (
---	Codigo_Distribuidor NVARCHAR(50),
---	Codigo_Pelicula NVARCHAR(50),
---	Codigo_Sala NVARCHAR(50),
---	Fecha_Funcion DATETIME,
-	
---);
 
 
---INSERT INTO @Resumen(Codigo_Distribuidor, e.Codigo_Pelicula, e.Codigo_Sala, e.Fecha_Funcion,e.Precio_Tarifa,e.Precio_Final)
---SELECT e.Codigo_Distribuidor, e.Codigo_Pelicula, e.Codigo_Sala, e.Fecha_Funcion, e.Precio_Tarifa, e.Precio_Final, COUNT(*) AS Cantidad_Entradas
---FROM @Entrada_Incaa e
---GROUP BY e.Codigo_Distribuidor, e.Codigo_Pelicula, e.Codigo_Sala, e.Fecha_Funcion, e.Precio_Tarifa, e.Precio_Final
-
-
---SELECT e.Codigo_Distribuidor, e.Codigo_Pelicula, e.Codigo_Sala, e.Fecha_Funcion, e.Precio_Tarifa, e.Precio_Final, COUNT(*) AS Cantidad_Entradas
---FROM @Entrada_Incaa e
---GROUP BY e.Codigo_Distribuidor, e.Codigo_Pelicula, e.Codigo_Sala, e.Fecha_Funcion, e.Precio_Tarifa, e.Precio_Final
-
-
-UPDATE @Entrada_Incaa SET Precio_Base = Precio_Final/1.10
-
+--Resume las entradas - cantidades por función y etc.
 
 DECLARE @Resumen_Entrada TABLE
 (
+	Id INT PRIMARY KEY IDENTITY(1,1),
 	Codigo_Distribuidor NVARCHAR(50),
 	Codigo_Pelicula NVARCHAR(50),
 	Codigo_Sala NVARCHAR(50),
 	Fecha_Funcion DATETIME,
 	Precio_Final DECIMAL(18,3),
+	Precio_Tarifa DECIMAL(18,3),
 	Cantidad_Entrada INT,
 	Tipo_Transaccion NVARCHAR(50),
-	Precio_Base Numeric(18,3)
+	Tipo_Distribucion NVARCHAR(50),
+	Precio_Base Numeric(18,3),
+	Numero_Primer_BOC INT,
+	Total_Impuesto Numeric(18,3)
 )
 
-INSERT INTO @Resumen_Entrada(Codigo_Distribuidor, Codigo_Pelicula, Codigo_Sala, Fecha_Funcion, Precio_Final, Tipo_Transaccion, Precio_Base, Cantidad_Entrada)
-SELECT e.Codigo_Distribuidor, e.Codigo_Pelicula, e.Codigo_Sala, e.Fecha_Funcion, e.Precio_Final, e.Tipo_Distribucion, 
-				E.Precio_Base,
-				COUNT(*) AS Cantidad_Entrada
+INSERT INTO @Resumen_Entrada(Codigo_Distribuidor, Codigo_Pelicula, Codigo_Sala, Fecha_Funcion, Precio_Final, Precio_Tarifa, Precio_Base, Cantidad_Entrada, e.Tipo_Distribucion, Tipo_Transaccion)
+SELECT e.Codigo_Distribuidor, e.Codigo_Pelicula, e.Codigo_Sala, e.Fecha_Funcion, e.Precio_Final, e.Precio_Tarifa, E.Precio_Base, COUNT(*) AS Cantidad_Entrada, e.Tipo_Distribucion, e.Tipo_Transaccion 			
 FROM @Entrada_Incaa e
-GROUP BY e.Codigo_Distribuidor, e.Codigo_Pelicula, e.Codigo_Sala, e.Fecha_Funcion, e.Precio_Final, e.Tipo_Distribucion,E.Precio_Base
+GROUP BY e.Codigo_Distribuidor, e.Codigo_Pelicula, e.Codigo_Sala, e.Fecha_Funcion, e.Precio_Final,  e.Precio_Tarifa, e.Tipo_Distribucion, e.Tipo_Transaccion , E.Precio_Base
 
-SELECT c.Periodo, c.Codigo_Sala, CONVERT(DATE,e.Fecha_Funcion) AS 'Fecha Funcion', CONVERT(TIME,f.FechaHora_Funcion) AS 'Hora función',
+
+--SELECT * FROM @Resumen_Entrada
+
+-- ACTUALIZANDO EL RESUMEN DE ENTRADAS CON SU PRIMER BOC 
+
+DECLARE CURSOR_REntrada CURSOR FOR SELECT re.ID FROM @Resumen_Entrada re
+DECLARE @Id_REntrada INT;
+
+OPEN CURSOR_REntrada;
+
+FETCH NEXT FROM CURSOR_REntrada INTO @Id_REntrada ;
+
+WHILE @@FETCH_STATUS=0
+BEGIN
+	DECLARE @Primer_BOC INT=NULL;
+
+	-- busco el primer id de cada grupo
+	SELECT TOP 1 @Primer_BOC=ei.Id_Entrada
+	FROM @Entrada_Incaa ei
+	INNER JOIN @Resumen_Entrada re ON re.Codigo_Sala=ei.Codigo_Sala AND re.Codigo_Pelicula=ei.Codigo_Pelicula AND		
+			re.Codigo_Distribuidor=ei.Codigo_Distribuidor AND ei.Fecha_Funcion=re.Fecha_Funcion AND 
+			ei.Precio_Tarifa=re.Precio_Tarifa AND ei.Tipo_Transaccion=re.Tipo_Transaccion
+	WHERE re.Id=@Id_REntrada
+	ORDER BY ei.Id_Entrada ASC 
+
+	UPDATE @Resumen_Entrada SET Numero_Primer_BOC=@Primer_BOC, 
+								Total_Impuesto=Precio_Base/1.10*Cantidad_Entrada
+	WHERE Id=@Id_REntrada
+	   
+	FETCH NEXT FROM CURSOR_REntrada INTO @Id_REntrada ;
+END
+
+CLOSE CURSOR_REntrada;
+DEALLOCATE CURSOR_REntrada; 
+								
+								
+-- JUNTANDO TODO -       CALENDARIO | Datos de la función |  entradas
+DECLARE @Bordereaux TABLE 
+(
+	Id INT PRIMARY KEY IDENTITY(1,1),
+	Periodo INT,
+	Codigo_Sala NVARCHAR(50), 
+	--
+	Fecha_Calendario DATE, 
+	FechaHora_Funcion DATETIME, 
+	--
+	Numero_Primer_Boc INT,
+	--
+	Codigo_Pelicula NVARCHAR(50),
+	Distribucion NVARCHAR(50),
+	Codigo_Distribuidor NVARCHAR(50),
+	Precio_Base NUMERIC(18,3),
+	Cantidad_Entradas INT,
+	--
+	Total_Impuesto NUMERIC(18,3),
+	--
+	Precio_Venta NUMERIC(18,3),
+	Tipo_Transaccion NVARCHAR(50),
+	Tipo_Distribucion NVARCHAR(50),
+	--
+	Serie NVARCHAR(50)
+);
+
+--SELECT * FROM @Resumen_Entrada
+
+
+INSERT INTO @Bordereaux (Periodo, Codigo_Sala, Fecha_Calendario, FechaHora_Funcion, Numero_Primer_Boc, Codigo_Pelicula, Distribucion, Codigo_Distribuidor, Precio_Base, Cantidad_Entradas, Total_Impuesto, Precio_Venta, Tipo_Transaccion, Tipo_Distribucion, Serie)
+SELECT c.Periodo, c.Codigo_Sala,
+		--
+		c.Fecha AS 'Fecha_Calendario',
+		f.FechaHora_Funcion AS 'FechaHora_Funcion',
+		--
+		re.Numero_Primer_Boc,
+		--
 		f.Codigo_Pelicula, 
-		Distribucion=CASE WHEN e.Tipo_Transaccion='NORMAL' THEN 'BASE'
-						  WHEN e.Tipo_Transaccion='DEVOLUCION' THEN 'DEVO'
-						  ELSE '' END,
+		Distribucion=CASE WHEN re.Tipo_Transaccion='NORMAL' OR re.Tipo_Distribucion='CORTESIA' THEN 'BASE'
+						  WHEN re.Tipo_Transaccion='DEVOLUCION' THEN 'DEVO'
+						  ELSE NULL END,
 		f.Codigo_Distribuidor,
-		e.Precio_Base,
-		e.Cantidad_Entrada
+		ISNULL(f.Precio_Sin_Impuesto, 0.00) AS Precio_Base,
+		ISNULL(re.Cantidad_Entrada,0) AS Cantidad_Entradas,
+		--
+		ISNULL(re.Total_Impuesto,0.00) AS Total_Impuesto,
+		--
+		f.Precio_Venta,
+		re.Tipo_Transaccion,
+		re.Tipo_Distribucion,
+		--
+		f.Serie
 FROM @Calendario c
 LEFT JOIN @Funciones f ON f.Codigo_Sala=c.Codigo_Sala AND CONVERT(DATE,f.FechaHora_Funcion)=c.Fecha
-LEFT JOIN @Resumen_Entrada e ON e.Codigo_Distribuidor=f.Codigo_Distribuidor AND
-								e.Codigo_Pelicula=f.Codigo_Pelicula AND
-								e.Codigo_Sala=f.Codigo_Sala AND
-								e.Fecha_Funcion=f.FechaHora_Funcion AND 
-								e.Precio_Final=f.Precio_Venta
-								
-								
+LEFT JOIN @Resumen_Entrada re ON re.Codigo_Distribuidor=f.Codigo_Distribuidor AND
+								re.Codigo_Pelicula=f.Codigo_Pelicula AND
+								re.Codigo_Sala=f.Codigo_Sala AND
+								re.Fecha_Funcion=f.FechaHora_Funcion AND 
+								re.Precio_Tarifa=f.Precio_Venta
 
 
+--ADAPTANDO A LA SALIDA ANTIGUA. - Primer bordereaux
 
+SELECT  
+		b.Periodo AS Periodo_Fiscal,
+		b.Codigo_Sala AS Codigo_Sala,
+		b.Fecha_Calendario Fecha_Calendario,
+		b.FechaHora_Funcion Fecha_Hora_Funcion,
+		b.Codigo_Pelicula AS Codigo_Pelicula,
+		ISNULL(b.Distribucion,'BASE') Tipo_Funcion,
+		b.Codigo_Distribuidor,
+		b.Numero_Primer_Boc,
+		1 AS Serie,
+		--
+		b.Precio_Base AS Precio_Basico,
+		b.Precio_Base AS Impuesto,
+		b.Cantidad_Entradas, 
+		b.Total_Impuesto,
+		--
+		0 AS Id_FuncionUbicacion,
+		0 AS Id_Funcion,
+		0 AS Id_Evento,
+		0 AS Id_Tarifa_FuncionUbicacion,
+		0 AS Id_Ubicacion,
+		0 AS Id_Tarifa,
+		--
+		b.Precio_Venta,
+		--
+		ISNULL(b.Tipo_Transaccion,'NORMAL') AS Tipo_Entrada,
+		0 As Numero_Funcion,
+		ISNULL(b.Serie,'Z') AS Letra_Tarifa
+		--
+FROM @Bordereaux b
+ORDER BY Periodo_Fiscal ASC, Codigo_Sala ASC, Fecha_Hora_Funcion ASC, Distribucion, Codigo_Pelicula ASC, Codigo_Distribuidor ASC, Precio_Basico DESC
 
