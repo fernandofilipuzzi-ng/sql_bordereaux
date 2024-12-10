@@ -1,36 +1,31 @@
 
 
---USE BD_MUNICIPALIDADORAN
---USE BD_MINACLAVERO
---USE BD_CINEMALVINAS
---USE BD_MUNICIPALIDADMALARGUE
---USE BD_CINEOPENPLAZA
----USE BD_MUNICIPALIDADMALARGUE
+USE BD_CINEMALVINAS;
 
---CREATE PROCEDURE [dbo].[sp_sys_VentaEntradas_Entradas_F700_Cine_2]
---(
---   @Id_Distribuidor INT,
---   @Id_Evento INT,
---   @Fecha_Desde DATE,
---   @Fecha_Hasta DATE
---)
---AS
---BEGIN
+GO
 
---	SET NOCOUNT ON;
+CREATE OR ALTER PROCEDURE [dbo].[sp_sys_VentaEntradas_Entradas_F700_Cine_2]
+(
+   @Id_Distribuidor INT,
+   @Id_Evento INT,
+   @Fecha_Desde DATE,
+   @Fecha_Hasta DATE
+)
+AS
+BEGIN
 
-	DECLARE @Id_Evento INT=0
-	--DECLARE @Desde DATETIME='11-1-2024';
-	--DECLARE @Hasta DATETIME='11-30-2024';
+	SET NOCOUNT ON;
 
-	DECLARE @Fecha_Desde DATETIME='11-6-2024';
-	DECLARE @Fecha_Hasta DATETIME='11-6-2024';
+	--DECLARE @Id_Evento INT=0
+
+	--DECLARE @Fecha_Desde DATETIME='11-1-2024';
+	--DECLARE @Fecha_Hasta DATETIME='11-6-2024';
 
 	--CUANDO hace LA MISMA pelicula en VARIOS EVENTOS
-	DECLARE @Codigo_Incaa NVARCHAR(50)='64240248';--'63240017';
-	--SELECT TOP 1 @Codigo_Incaa=c.Codigo_Incaa 
-	--FROM sys_VentaEntradas_Eventos_Peliculas_Cine c 
-	--WHERE c.Id_Evento=@Id_Evento;
+	DECLARE @Codigo_Incaa NVARCHAR(50)=NULL;--'64240248';--'63240017';
+	SELECT TOP 1 @Codigo_Incaa=c.Codigo_Incaa 
+	FROM sys_VentaEntradas_Eventos_Peliculas_Cine c 
+	WHERE c.Id_Evento=@Id_Evento;
 
 
 	-- CREAR CALENDARIO: PERIODO (depende de FECHA) y FECHA para sacar el dia  - CODIGO_SALA
@@ -516,13 +511,13 @@
 	--WHERE b.FechaHora_Funcion = '2024-10-02 22:00:00.000'
 	ORDER BY Periodo_Fiscal ASC, Codigo_Sala ASC, Fecha_Calendario ASC, Fecha_Hora_Funcion ASC, Codigo_Pelicula ASC, Codigo_Distribuidor ASC, Precio_Basico DESC, b.Serie_Letra DESC, b.Orden_Serie DESC
 
-	SELECT  b.Fecha_Calendario,SUM(b.Cantidad_Entradas) ---SUM(CASE WHEN b.Tipo_Transaccion='DEVOLUCION' THEN 0 ELSE b.Cantidad_Entradas END ) 
-	FROM @Bordereaux b
-	WHERE b.Tipo_Transaccion noT LIKE 'DEVOLUCION' AND b.Tipo_Distribucion noT LIKE 'CORTESIA'
-	GROUP BY b.Fecha_Calendario
+	--SELECT  b.Fecha_Calendario,SUM(b.Cantidad_Entradas),SUM(b.Cantidad_Entradas*b.Precio_Venta)
+	--FROM @Bordereaux b
+	--WHERE b.Tipo_Transaccion noT LIKE 'DEVOLUCION' AND b.Tipo_Distribucion noT LIKE 'CORTESIA'
+	--GROUP BY b.Fecha_Calendario
 
 
 
 	--SELECT +84+1+125-5+4+34-2+1
 
---END
+END
