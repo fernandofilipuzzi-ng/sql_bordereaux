@@ -16,13 +16,13 @@ BEGIN
 
 	SET NOCOUNT ON;
 
-	--DECLARE @Id_Evento INT=0
+	DECLARE @Id_Evento INT=0
 
-	--DECLARE @Fecha_Desde DATETIME='11-1-2024';
-	--DECLARE @Fecha_Hasta DATETIME='11-6-2024';
+	DECLARE @Fecha_Desde DATETIME='11-1-2024';
+	DECLARE @Fecha_Hasta DATETIME='11-6-2024';
 
 	--CUANDO hace LA MISMA pelicula en VARIOS EVENTOS
-	DECLARE @Codigo_Incaa NVARCHAR(50)=NULL;--'64240248';--'63240017';
+	DECLARE @Codigo_Incaa NVARCHAR(50)='64240243';--NULL;--'64240248';--'63240017';
 	SELECT TOP 1 @Codigo_Incaa=c.Codigo_Incaa 
 	FROM sys_VentaEntradas_Eventos_Peliculas_Cine c 
 	WHERE c.Id_Evento=@Id_Evento;

@@ -3,7 +3,7 @@ USE BD_CINEMALVINAS;
 
 GO
 
-CREATE OR ALTER PROCEDURE [dbo].[sp_sys_VentaEntradas_Entradas_Diario_Bordereaux_Cine_2]
+CREATE OR ALTER PROCEDURE [dbo].[sp_sys_VentaEntradas_Entradas_Diario_Bordereaux_Cine]
 (
    @Id_Evento INT,
    @Fecha_Desde DATE,
@@ -12,7 +12,7 @@ CREATE OR ALTER PROCEDURE [dbo].[sp_sys_VentaEntradas_Entradas_Diario_Bordereaux
 AS
 BEGIN
 
-	--EXEC sp_sys_VentaEntradas_Entradas_Diario_Bordereaux_Cine_2 1079, '11-1-2024','11-6-2024'
+	--EXEC sp_sys_VentaEntradas_Entradas_Diario_Bordereaux_Cine 1079, '11-1-2024','11-6-2024'
 
  --   DECLARE @Id_Evento INT=0;
 	--DECLARE @Fecha_Desde DATETIME='11-1-2024';
@@ -76,7 +76,7 @@ BEGIN
 		Letra_Tarifa VARCHAR(100)
 	);
 	INSERT INTO @Entradas
-	EXEC sp_sys_VentaEntradas_Entradas_F700_Cine_2 @Id_Distribuidor=0, @Id_Evento=@Id_Evento, @Fecha_Desde=@Fecha_Desde, @Fecha_Hasta=@Fecha_Hasta;
+	EXEC sp_sys_VentaEntradas_Entradas_F700_Cine @Id_Distribuidor=0, @Id_Evento=@Id_Evento, @Fecha_Desde=@Fecha_Desde, @Fecha_Hasta=@Fecha_Hasta;
 
 	DECLARE @Entradas_Bordereaux TABLE
 	(
