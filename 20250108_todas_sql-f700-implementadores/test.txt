@@ -1,0 +1,36 @@
+
+
+
+DECLARE @Codigo_Incaa INT=64240248
+DECLARE @Fecha DATE= '11-09-2024'
+
+SELECT e.Id AS Id_Entrada, 
+
+				evI.Codigo_Incaa AS Codigo_Pelicula,  
+				REPLACE(LI.Codigo_Incaa,'_','') AS Codigo_Sala,
+				dI.Codigo_Incaa AS Codigo_Distribuidor,
+
+				f.Fecha AS FechaHora_Funcion,
+				e.Entrada_Anulada, e.Activo, e.Cortesia  AS Es_Cortesia,
+
+				Precio_Venta=CASE WHEN t_fu.Id IS NOT NULL  THEN t_fu.Precio  
+							 ELSE  fu.Precio END 
+FROM sys_VentaEntradas_Entradas e
+INNER join sys_VentaEntradas_Entradas_ItemCarrito eic ON eic.Id_Entrada = e.Id
+INNER join sys_VentaEntradas_ItemCarrito ic ON ic.Id=eic.Id_ItemCarrito 
+INNER JOIN sys_VentaEntradas_FuncionUbicacion fu ON fu.Id=ic.Id_FuncionUbicacion 
+INNER JOIN sys_VentaEntradas_Funciones f ON f.Id = fu.Id_Funcion
+INNER JOIN sys_VentaEntradas_Eventos ev ON f.Id_Evento=ev.Id 
+
+
+EXEC sp_sys_VentaEntradas_Entradas_F700_Cine 0, 0, '11-1-2024', '11-30-2024'
+
+EXEC sp_sys_VentaEntradas_Entradas_F700_Cine 0, 0, '12-1-2024', '12-30-2024'
+INNER JOIN sys_VentaEntradas_Ubicaciones u ON u.Id=fu.Id_Ubicacion 
+INNER JOIN sys_VentaEntradas_Ubicaciones_Salas_Cine LI ON LI.Id_Ubicacion=u.Id
+INNER JOIN sys_VentaEntradas_Eventos_Peliculas_Cine evI ON evI.Id_Evento=ev.Id 
+INNER JOIN sys_VentaEntradas_Distribuidores_Cine dI ON dI.Id=evI.Id_Distribuidor
+LEFT JOIN sys_Tarifas_U_FuncionUbicacion t_fu ON t_fu.Id_FuncionUbicacion=fu.Id
+INNER JOIN sys_Tarifas t ON t.Id=t_fu.Id_Tarifa and ic.id_Tarifa=t.Id 
+WHERE CONVERT(DATE, f.Fecha)>=@Fecha AND CONVERT(DATE, f.Fecha)<=@Fecha
+			AND ( evI.Codigo_Incaa=@Codigo_Incaa OR @Codigo_Incaa LIKE '' OR  @Codigo_Incaa IS NULL ) 
